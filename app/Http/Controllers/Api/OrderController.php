@@ -22,6 +22,30 @@ class OrderController extends Controller
 
     public function index(Request $request): JsonResponse
     {
+        $orders = Order::where('user_id', $request->user()->id)
+            ->orderBy('created_at', 'desc')
+            ->get()
+            ->map(function ($order) {
+                return [
+                    'id' => $order->id,
+                    'symbol' => $order->symbol,
+                    'side' => $order->side,
+                    'price' => $order->price,
+                    'amount' => $order->amount,
+                    'filled_amount' => $order->filled_amount,
+                    'remaining_amount' => $order->remaining_amount,
+                    'status' => $order->status,
+                    'created_at' => $order->created_at->toIso8601String(),
+                ];
+            });
+
+        return response()->json([
+            'orders' => $orders,
+        ]);
+    }
+
+    public function orderbook(Request $request): JsonResponse
+    {
         $request->validate([
             'symbol' => ['required', 'string', 'max:10'],
         ]);
@@ -44,7 +68,7 @@ class OrderController extends Controller
                     'filled_amount' => $order->filled_amount,
                     'remaining_amount' => $order->remaining_amount,
                     'status' => $order->status,
-                    'created_at' => $order->created_at,
+                    'created_at' => $order->created_at->toIso8601String(),
                 ];
             });
 
@@ -64,7 +88,7 @@ class OrderController extends Controller
                     'filled_amount' => $order->filled_amount,
                     'remaining_amount' => $order->remaining_amount,
                     'status' => $order->status,
-                    'created_at' => $order->created_at,
+                    'created_at' => $order->created_at->toIso8601String(),
                 ];
             });
 
@@ -84,7 +108,9 @@ class OrderController extends Controller
                 $user = $request->user();
 
                 if ($validated['side'] === Order::SIDE_BUY) {
-                    $requiredBalance = bcmul($validated['price'], $validated['amount'], 8);
+                    $orderTotal = bcmul($validated['price'], $validated['amount'], 8);
+                    $commission = bcmul($orderTotal, '0.015', 8);
+                    $requiredBalance = bcadd($orderTotal, $commission, 8);
 
                     if (bccomp($user->balance, $requiredBalance, 8) < 0) {
                         throw new \Exception('Insufficient balance');
@@ -167,7 +193,9 @@ class OrderController extends Controller
                 $remainingAmount = $order->remaining_amount;
 
                 if ($order->isBuy()) {
-                    $refundAmount = bcmul($order->price, $remainingAmount, 8);
+                    $refundTotal = bcmul($order->price, $remainingAmount, 8);
+                    $refundCommission = bcmul($refundTotal, '0.015', 8);
+                    $refundAmount = bcadd($refundTotal, $refundCommission, 8);
                     $order->user->balance = bcadd($order->user->balance, $refundAmount, 8);
                     $order->user->save();
                 } else {
